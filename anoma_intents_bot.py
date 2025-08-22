@@ -557,6 +557,8 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                 continue
             px, py = dg["players"][uid]["x"], dg["players"][uid]["y"]
             killed = False
+            hit = False
+            remaining = None
             for ex, ey in [(px+1,py), (px-1,py), (px,py+1), (px,py-1)]:
                 # find enemy by coords
                 target = None
@@ -581,10 +583,17 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                             prof["xp"] -= get_level_exp_requirement(prof["level"])
                             prof["level"] += 1
                         await player_storage.upsert_player(int(uid), prof)
+                    else:
+                        hit = True
+                        remaining = target["hp"]
                     break
             at["_processed"] = True
             if killed:
                 await _notify_channel(channel_id, f"⚔️ <@{uid}> defeated an enemy!")
+            elif hit:
+                await _notify_channel(channel_id, f"🗡️ <@{uid}> hit an enemy (-2 HP, {remaining} HP left)")
+            else:
+                await _notify_channel(channel_id, "🗡️ No enemy adjacent")
         # 敌人行动：相邻则攻击，否则尝试移动
         for e in dg["enemies"]:
             dx, dy = random.choice([(1,0),(-1,0),(0,1),(0,-1),(0,0)])
