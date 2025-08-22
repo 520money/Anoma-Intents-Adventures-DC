@@ -33,14 +33,27 @@ python anoma_intents_bot.py
 - Inventory/Shop: `p!inventory`, `p!shop`, `p!buy <item>`, `p!transfer <@user> <amount>`
 - Alignment/Leaderboard: `p!alignment`, `p!leaderboard [level|gold|quests]`
 - PvP/Multiplayer: `p!duel / p!accept / p!decline / p!cancel`, `p!rumble`
-- Dungeon (co‑op): `p!dungeon create|join|start|leave|status|map`, `p!move <up|down|left|right|w|a|s|d>`, `p!attack`
+- Dungeon (co‑op): `p!dungeon create|join|start|leave|status|map|help|next`, `p!move <up|down|left|right|w|a|s|d>`, `p!attack`, `p!use <item>`, `p!revive`
 
-## Dungeon Notes
-- Attack is melee adjacency: move next to an enemy (up/down/left/right) before `p!attack`
-- Map is on‑demand via `p!dungeon map` (no auto‑broadcast)
+## Dungeon Gameplay (quick guide)
+- Start a run: `p!dungeon create` → `p!dungeon join` (multiple players) → `p!dungeon start`
+- Move/Attack: `p!move up/down/left/right` (or `w/a/s/d`) → `p!attack` (melee, must be adjacent)
+- Items: `p!use Potion` (+5 HP), `p!use Bomb` (damage adjacent enemies)
+- Status/Map: `p!dungeon status` (HP, floor, enemy count), `p!dungeon map` (ASCII map, on‑demand)
+- Revive: `p!revive` (costs 5 gold)
+- Next floor: clear all enemies then `p!dungeon next` (boss every 3 floors)
+
+Legend (ASCII map):
+- `P` = player, `✖` = downed player, `E` = enemy, `B` = boss, `X` = obstacle, `#` = wall, `.` = ground
 
 ## Storage
 - Lightweight JSON: `data/players.json`, `data/intents.json`, `data/dungeons.json`
+
+## Reviewer flow
+1) `p!help` and `p!dungeon help`
+2) `p!create human warrior` → `p!daily` → `p!quest medium` → `p!shop` / `p!buy Potion`
+3) `p!duel @user` → `p!accept`
+4) `p!dungeon create` → `join` → `start` → `move/attack` → `use potion/bomb` → `next` → `revive` → `map/status`
 
 ## Links
 - Repository (submission): https://github.com/520money/Anoma-Intents-Adventures-DC
