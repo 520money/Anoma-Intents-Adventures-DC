@@ -1,3 +1,33 @@
+# Playtest Announcement (for reviewers)
+**Play Anoma Intents Adventures (Discord, Multiplayer Roguelike)**
+- Bot Invite: https://discord.com/oauth2/authorize?client_id=1408016619862491217&permissions=67584&integration_type=0&scope=bot
+- Test Server (read‑only channel + play channel): <YOUR_TEST_SERVER_INVITE>
+- How to start (30 seconds):
+  - `p!help`
+  - `p!create human warrior`
+  - `p!dungeon create` → `p!dungeon join` → `p!dungeon start`
+  - Move/attack: `p!move up` | `p!attack` | `p!dungeon map`
+  - Co‑op: clear floor → `p!dungeon next` | `p!use Potion/Bomb` | `p!revive`
+
+# Pinned Message (drop this into the play channel)
+Welcome! Quick start:
+- `p!create human warrior`
+- `p!dungeon join` → `p!dungeon start`
+- `p!move up/down/left/right` (w/a/s/d), then `p!attack`
+- `p!dungeon map` to view ASCII map on demand
+- `p!use Potion/Bomb`, `p!revive` (5 gold), `p!dungeon next` after clearing
+Other modes: `p!rumble`, `p!duel @user`, `p!quest medium`, `p!shop`/`p!buy Potion`.
+
+# 1‑Minute Demo Script
+- 00:00 `p!help` → say “intent‑centric, multiplayer”
+- 00:10 `p!create human warrior` → `p!daily` → `p!quest medium` → `p!buy Potion`
+- 00:25 `p!duel @user` → partner `p!accept` (settlement)
+- 00:35 `p!dungeon create` → `join` → `start` → `status` → `move up` → `attack` → `dungeon map`
+- 00:50 `p!use Bomb` → clear floor → `p!dungeon next` → `p!revive` if down
+- 00:58 Say “map is on‑demand, all actions are intents settled by a solver; chain‑ready.”
+
+---
+
 # Anoma Intents Adventures — Submission Package
 
 ## Links
@@ -39,9 +69,8 @@ Anoma Intents Adventures is a fully multiplayer, top-down roguelike RPG built en
 - Progression & economy: `p!daily`, `p!work`, `p!quest [easy|medium|hard]`, `p!shop`, `p!buy`, `p!transfer`, `p!alignment`, `p!leaderboard`
 - Multiplayer PvP: `p!duel`, `p!accept`, `p!decline`, `p!cancel`, `p!rumble`
 - Roguelike Dungeon:
-  - `p!dungeon create|join|start|leave|status|map`
-  - `p!move <up|down|left|right|w|a|s|d>`
-  - `p!attack` (melee; only hits if an enemy is in an adjacent tile)
+  - `p!dungeon create|join|start|leave|status|map|help|next`
+  - `p!move <up|down|left|right|w|a|s|d>` | `p!attack` | `p!use <item>` | `p!revive`
 
 Dungeon help: `p!dungeon help` (rules, rewards, victory, cleanup conditions).
 
