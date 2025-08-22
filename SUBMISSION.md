@@ -8,6 +8,7 @@
   - `p!dungeon create` → `p!dungeon join` → `p!dungeon start`
   - Move/attack: `p!move up` | `p!attack` | `p!dungeon map`
   - Co‑op: clear floor → `p!dungeon next` | `p!use Potion/Bomb` | `p!revive`
+- Full 1‑minute demo script: see `DEMO_SCRIPT.md` in this repo.
 
 # Pinned Message (drop this into the play channel)
 Welcome! Quick start:
