@@ -1,9 +1,9 @@
 # Anoma Intents Adventures — Submission Package
 
 ## Links
-- Repository: https://github.com/520money/Anoma-Intents-Adventures
+- Repository: https://github.com/520money/Anoma-Intents-Adventures-DC
 - Bot Invite (recommended permissions):
-  - https://discord.com/api/oauth2/authorize?client_id=1408016619862491217&permissions=117824&scope=bot
+  - https://discord.com/oauth2/authorize?client_id=1408016619862491217&permissions=67584&integration_type=0&scope=bot
 - Optional Test Server Invite (read-only channel for reviewers): <YOUR_TEST_SERVER_INVITE>
 - Demo Video: <YOUR_DEMO_VIDEO_URL>
 - Screenshots: <SCREENSHOT_1_URL>, <SCREENSHOT_2_URL>, <SCREENSHOT_3_URL>
@@ -109,5 +109,5 @@ python anoma_intents_bot.py
 ---
 
 ## Contact
-- Author: <YOUR_NAME or DISCORD_HANDLE>
+- Author: More2591
 - Timezone / Availability: <OPTIONAL>
