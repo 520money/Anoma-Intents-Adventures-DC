@@ -463,7 +463,13 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
         # handle end timer
         if dg.get("end_at", 0) and now_ms >= dg["end_at"]:
             await _notify_channel(int(chan_id_str), "⏱️ Dungeon time is up. Instance closed.")
-            del all_dg[chan_id_str]
+            # remove from persistence to prevent reloading and spamming
+            try:
+                await dungeon_storage.remove(int(chan_id_str))
+            except Exception:
+                pass
+            if chan_id_str in all_dg:
+                del all_dg[chan_id_str]
             changed = True
             continue
         if dg.get("state") != "running":
@@ -1256,11 +1262,12 @@ async def rumble_cmd(ctx: commands.Context, seconds: int = 20):
 # ---------- Dungeon commands ----------
 @bot.command(name="dungeon")
 @commands.guild_only()
-async def dungeon_cmd(ctx: commands.Context, action: Optional[str] = None):
-    if action is None:
+async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
+    if not args:
         await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>")
         return
-    action = action.lower()
+    parts = args.strip().split()
+    action = parts[0].lower()
     if action == "create":
         await intent_storage.enqueue({"type": "dg_create", "channel_id": ctx.channel.id, "created_at": now()})
         await ctx.send("🛠️ Create intent submitted")
@@ -1344,13 +1351,10 @@ async def dungeon_cmd(ctx: commands.Context, action: Optional[str] = None):
     elif action == "reset":
         await dungeon_storage.remove(ctx.channel.id)
         await ctx.send("🧹 Dungeon reset for this channel. You can now p!dungeon create → join → start.")
-    elif action.startswith("timer"):
-        parts = action.split()
-        minutes = None
-        if len(parts) == 2 and parts[1].isdigit():
+    elif action == "timer":
+        if len(parts) >= 2 and parts[1].isdigit():
             minutes = int(parts[1])
-        # if user typed "timer" as separate token, parse from message content tail
-        if minutes is None:
+        else:
             await ctx.send("Usage: p!dungeon timer <minutes>")
             return
         dg = await dungeon_storage.get(ctx.channel.id)
