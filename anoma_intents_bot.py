@@ -231,6 +231,7 @@ def _new_dungeon(width: int = 10, height: int = 10) -> Dict[str, Any]:
         "players": {},  # user_id -> {x,y,hp,dead}
         "enemies": [],  # list of {x,y,hp,boss}
         "obstacles": [],  # list of {x,y}
+        "end_at": 0,  # ms timestamp; 0 = no timer
         "next_tick": int(time.time() * 1000) + DUNGEON_TICK_MS,
     }
 
@@ -459,6 +460,12 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
     # Tick process (move/attack/AI/broadcast)
     now_ms = int(time.time() * 1000)
     for chan_id_str, dg in list(all_dg.items()):
+        # handle end timer
+        if dg.get("end_at", 0) and now_ms >= dg["end_at"]:
+            await _notify_channel(int(chan_id_str), "⏱️ Dungeon time is up. Instance closed.")
+            del all_dg[chan_id_str]
+            changed = True
+            continue
         if dg.get("state") != "running":
             continue
         if now_ms < dg.get("next_tick", 0):
@@ -827,7 +834,7 @@ async def help_cmd(ctx: commands.Context):
         "p!cancel - (challenger) cancel latest pending duel\n"
         "p!rumble - start free-for-all rumble\n\n"
         "Multiplayer Roguelike Dungeon (full):\n"
-        "p!dungeon create|join|start|leave|status|map|help|next\n"
+        "p!dungeon create|join|start|leave|status|map|help|next|reset\n"
         "p!move <up|down|left|right|w|a|s|d> | p!attack | p!use <item> | p!revive\n"
         "map is on-demand via p!dungeon map (no auto-broadcast).\n\n"
         "Region & Pets:\n"
@@ -1251,7 +1258,7 @@ async def rumble_cmd(ctx: commands.Context, seconds: int = 20):
 @commands.guild_only()
 async def dungeon_cmd(ctx: commands.Context, action: Optional[str] = None):
     if action is None:
-        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help")
+        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>")
         return
     action = action.lower()
     if action == "create":
@@ -1323,16 +1330,39 @@ async def dungeon_cmd(ctx: commands.Context, action: Optional[str] = None):
             "- Use item: p!use <item> (Potion heals +5; Bomb damages adjacent enemies).\n"
             "- Revive: p!revive (costs 5 gold).\n"
             "- Map: p!dungeon map (ASCII). No auto-broadcast; check on demand.\n"
-            "- Status: p!dungeon status | Next floor: p!dungeon next | Leave: p!dungeon leave\n\n"
+            "- Status: p!dungeon status | Next floor: p!dungeon next | Leave: p!dungeon leave\n"
+            "- Admin: p!dungeon reset (force clear current channel instance)\n\n"
             "Rewards:\n"
             "- Defeating an enemy: +5 XP, +3 gold; chance to drop Potion/Bomb.\n\n"
             "End conditions:\n"
             "- Victory when all enemies are defeated (instance closes).\n"
             "- Cleanup when no players remain.\n"
+            "Timer:\n"
+            "- p!dungeon timer <minutes> — auto close after N minutes.\n"
         )
         await ctx.send(rules)
+    elif action == "reset":
+        await dungeon_storage.remove(ctx.channel.id)
+        await ctx.send("🧹 Dungeon reset for this channel. You can now p!dungeon create → join → start.")
+    elif action.startswith("timer"):
+        parts = action.split()
+        minutes = None
+        if len(parts) == 2 and parts[1].isdigit():
+            minutes = int(parts[1])
+        # if user typed "timer" as separate token, parse from message content tail
+        if minutes is None:
+            await ctx.send("Usage: p!dungeon timer <minutes>")
+            return
+        dg = await dungeon_storage.get(ctx.channel.id)
+        if dg is None:
+            await ctx.send("❌ No dungeon yet. p!dungeon create")
+            return
+        end_at = int(time.time() * 1000) + minutes * 60 * 1000
+        dg["end_at"] = end_at
+        await dungeon_storage.upsert(ctx.channel.id, dg)
+        await ctx.send(f"⏱️ Timer set: this instance will end in {minutes} minutes.")
     else:
-        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help")
+        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>")
 
 
 # ---------- Use & Revive commands ----------
