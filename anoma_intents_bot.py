@@ -23,6 +23,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 BOT_PREFIXES = ["p!", "P!"]
+VERSION = "v2025-08-22-ack2"  # move/attack immediate acks + timer/reset
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 PLAYERS_JSON_PATH = os.path.join(DATA_DIR, "players.json")
 INTENTS_JSON_PATH = os.path.join(DATA_DIR, "intents.json")
@@ -819,6 +820,7 @@ async def help_cmd(ctx: commands.Context):
     text = (
         "🌟 Anoma Intents Adventures v2.1 (Discord-only)\n"
         "Prefix: p! or P!\n\n"
+        f"Version: {VERSION}\n\n"
         "Basics:\n"
         "p!create <race> <class> - create character\n"
         "p!profile - view profile\n"
@@ -851,6 +853,11 @@ async def help_cmd(ctx: commands.Context):
         " classes: " + ", ".join(ALLOWED_CLASSES) + "\n"
     )
     await ctx.send(text)
+
+
+@bot.command(name="version")
+async def version_cmd(ctx: commands.Context):
+    await ctx.send(f"Anoma Intents Adventures version: {VERSION}")
 
 
 @bot.command(name="create")
@@ -1367,6 +1374,43 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
         await ctx.send(f"⏱️ Timer set: this instance will end in {minutes} minutes.")
     else:
         await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>")
+
+
+# ---------- Move & Attack commands (immediate ack, reaction optional) ----------
+@bot.command(name="move")
+@commands.guild_only()
+async def move_cmd(ctx: commands.Context, direction: str = None):
+    if not direction:
+        await ctx.send("Usage: p!move <up|down|left|right|w|a|s|d>")
+        return
+    await intent_storage.enqueue({
+        "type": "dg_move",
+        "channel_id": ctx.channel.id,
+        "user_id": ctx.author.id,
+        "direction": direction,
+        "created_at": now(),
+    })
+    try:
+        await ctx.message.add_reaction("➡️")
+    except Exception:
+        pass
+    await ctx.send(f"➡️ Move intent submitted ({direction.lower()})")
+
+
+@bot.command(name="attack")
+@commands.guild_only()
+async def attack_cmd(ctx: commands.Context):
+    await intent_storage.enqueue({
+        "type": "dg_attack",
+        "channel_id": ctx.channel.id,
+        "user_id": ctx.author.id,
+        "created_at": now(),
+    })
+    try:
+        await ctx.message.add_reaction("🗡️")
+    except Exception:
+        pass
+    await ctx.send("🗡️ Attack intent submitted")
 
 
 # ---------- Use & Revive commands ----------

@@ -33,7 +33,7 @@ python anoma_intents_bot.py
 - Inventory/Shop: `p!inventory`, `p!shop`, `p!buy <item>`, `p!transfer <@user> <amount>`
 - Alignment/Leaderboard: `p!alignment`, `p!leaderboard [level|gold|quests]`
 - PvP/Multiplayer: `p!duel / p!accept / p!decline / p!cancel`, `p!rumble`
-- Dungeon (co‑op): `p!dungeon create|join|start|leave|status|map|help|next`, `p!move <up|down|left|right|w|a|s|d>`, `p!attack`, `p!use <item>`, `p!revive`
+- Dungeon (co‑op): `p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>`, `p!move <up|down|left|right|w|a|s|d>`, `p!attack`, `p!use <item>`, `p!revive`
 
 ## Dungeon Gameplay (quick guide)
 - Start a run: `p!dungeon create` → `p!dungeon join` (multiple players) → `p!dungeon start`
@@ -42,6 +42,7 @@ python anoma_intents_bot.py
 - Status/Map: `p!dungeon status` (HP, floor, enemy count), `p!dungeon map` (ASCII map, on‑demand)
 - Revive: `p!revive` (costs 5 gold)
 - Next floor: clear all enemies then `p!dungeon next` (boss every 3 floors)
+- Admin/Timer: `p!dungeon reset` (force clear current instance), `p!dungeon timer <minutes>` (auto close after N minutes)
 
 Legend (ASCII map):
 - `P` = player, `✖` = downed player, `E` = enemy, `B` = boss, `X` = obstacle, `#` = wall, `.` = ground
