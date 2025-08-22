@@ -1,39 +1,50 @@
 # Anoma Intents Adventures (Discord Bot)
 
-一个基于 Discord 文本消息交互的最小可运行版本，包含基础命令：help、create、profile、daily、work、quest、leaderboard、rumble。
+A fully multiplayer, top‑down roguelike RPG designed around Anoma’s intent‑centric philosophy. Players submit intents (commands) and an authoritative solver resolves conflicts and deterministically settles state.
 
-## 快速开始
+## Overview
+- Modes: Free‑for‑all Rumble, 1v1 Duels, and a cooperative Roguelike Dungeon (grid movement, adjacency melee, roaming enemies, victory on enemy clear, on‑demand ASCII map)
+- Intents Games features: character creation and respec, daily/work/quests (level^3*25), inventory/shop/buy, transfer, alignment, leaderboards
+- Intent‑centric: commands → intent queue → solver loop → settlement
 
-1) 安装 Python 3.10+
-2) 安装依赖：
+## Quickstart
 ```bash
+# Python 3.10+
 pip install -r requirements.txt
-```
-3) 复制 `.env.example` 为 `.env`，并填入你的 Discord 机器人 Token：
-```
-DISCORD_TOKEN=xxxxxxxxxxxxxxxxxxxx
-```
-4) 在 Discord 开发者后台为该 Bot 开启 Message Content Intent
-5) 运行机器人：
-```bash
+
+# copy env template and set your bot token locally (do NOT commit the real token)
+copy .env.example .env  # Windows CMD
+# or: Copy-Item .env.example .env  # PowerShell
+# then edit .env and set:
+# DISCORD_TOKEN=YOUR_BOT_TOKEN
+
+# enable “Message Content Intent” in Developer Portal -> Bot
 python anoma_intents_bot.py
 ```
 
-## 使用前缀
-- 使用 `p!` 或 `P!` 作为命令前缀，例如：`p!help`
+## Prefix
+- Use `p!` or `P!`, e.g. `p!help`
 
-## 基础命令
-- p!help：查看帮助
-- p!create <race> <class>：创建角色
-- p!profile：查看角色
-- p!daily：领取每日金币（冷却）
-- p!work：工作赚金币（冷却）
-- p!quest [easy|medium|hard]：进行任务，获得 XP/金币/可能的掉落
-- p!leaderboard [level|gold|quests]：排行榜
-- p!rumble：发起多人“乱斗”，成员反应或输入 `p!join` 参与
+## Core Commands
+- Help: `p!help`
+- Create/Profile: `p!create <race> <class>`, `p!profile`
+- Respec: `p!race <race>`, `p!class <class>` (2500 gold each)
+- Economy: `p!daily`, `p!work`, `p!quest [easy|medium|hard]`
+- Inventory/Shop: `p!inventory`, `p!shop`, `p!buy <item>`, `p!transfer <@user> <amount>`
+- Alignment/Leaderboard: `p!alignment`, `p!leaderboard [level|gold|quests]`
+- PvP/Multiplayer: `p!duel / p!accept / p!decline / p!cancel`, `p!rumble`
+- Dungeon (co‑op): `p!dungeon create|join|start|leave|status|map`, `p!move <up|down|left|right|w|a|s|d>`, `p!attack`
 
-## 数据存储
-- 默认使用 `data/players.json` 作为轻量级存储（可后续切换 SQLite）
+## Dungeon Notes
+- Attack is melee adjacency: move next to an enemy (up/down/left/right) before `p!attack`
+- Map is on‑demand via `p!dungeon map` (no auto‑broadcast)
 
-## 说明
-- 该版本旨在尽快跑通最小闭环，便于参赛演示；可按需求继续覆盖 intents-games 全量功能。
+## Storage
+- Lightweight JSON: `data/players.json`, `data/intents.json`, `data/dungeons.json`
+
+## Links
+- Repository (submission): https://github.com/520money/Anoma-Intents-Adventures-DC
+- Bot invite: https://discord.com/oauth2/authorize?client_id=1408016619862491217&permissions=67584&integration_type=0&scope=bot
+
+## Security
+- Never commit your real Discord bot token. Keep it only in your local `.env`.
