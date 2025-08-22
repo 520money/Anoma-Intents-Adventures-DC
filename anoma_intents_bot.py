@@ -407,7 +407,7 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                 continue
             uid = str(it["user_id"])
             if uid not in dungeon["players"]:
-                x, y = 1, 1
+                x, y = _rand_empty_cell(dungeon)
                 dungeon["players"][uid] = {"x": x, "y": y, "hp": PLAYER_BASE_HP, "dead": False}
                 await _notify_channel(channel_id, f"✅ <@{it['user_id']}> joined the dungeon")
                 changed = True
@@ -496,7 +496,9 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                     await player_storage.upsert_player(int(uid), prof)
                     p["dead"] = False
                     p["hp"] = PLAYER_BASE_HP
-                    p["x"], p["y"] = 1, 1
+                    # respawn at a safe random cell
+                    rx, ry = _rand_empty_cell(dg)
+                    p["x"], p["y"] = rx, ry
                     await _notify_channel(channel_id, f"❤️ <@{uid}> revived (-5 gold).")
             rv["_processed"] = True
         # 先处理移动
