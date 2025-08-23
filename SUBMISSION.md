@@ -7,7 +7,7 @@
   - `p!create human warrior`
   - `p!dungeon create` → `p!dungeon join` → `p!dungeon start`
   - Move/attack: `p!move up` | `p!attack` | `p!dungeon map`
-  - Co‑op: clear floor → `p!dungeon next` | `p!use Potion/Bomb` | `p!revive`
+  - Co‑op: clear floor → `p!dungeon next` | `p!use Potion/Bomb` (auto‑buy) | `p!revive (1 gold)` | `p!auto potion 10`
 - Full 1‑minute demo script: see `DEMO_SCRIPT.md` in this repo.
 
 # Pinned Message (drop this into the play channel)
@@ -24,7 +24,7 @@ Other modes: `p!rumble`, `p!duel @user`, `p!quest medium`, `p!shop`/`p!buy Potio
 - 00:10 `p!create human warrior` → `p!daily` → `p!quest medium` → `p!buy Potion`
 - 00:25 `p!duel @user` → partner `p!accept` (settlement)
 - 00:35 `p!dungeon create` → `join` → `start` → `status` → `move up` → `attack` → `dungeon map`
-- 00:50 `p!use Bomb` → clear floor → `p!dungeon next` → `p!revive` if down
+- 00:50 `p!use Bomb` (kill ≤1‑tile, −3 ≤2‑tile) → `p!auto attack on` → clear floor → `p!dungeon next` → `p!revive` if down
 - 00:58 Say “map is on‑demand, all actions are intents settled by a solver; chain‑ready.”
 
 ---
@@ -70,8 +70,8 @@ Anoma Intents Adventures is a fully multiplayer, top-down roguelike RPG built en
 - Progression & economy: `p!daily`, `p!work`, `p!quest [easy|medium|hard]`, `p!shop`, `p!buy`, `p!transfer`, `p!alignment`, `p!leaderboard`
 - Multiplayer PvP: `p!duel`, `p!accept`, `p!decline`, `p!cancel`, `p!rumble`
 - Roguelike Dungeon:
-  - `p!dungeon create|join|start|leave|status|map|help|next`
-  - `p!move <up|down|left|right|w|a|s|d>` | `p!attack` | `p!use <item>` | `p!revive`
+  - `p!dungeon create|join|start|leave|status|map|help|next|timer|mapauto`
+  - `p!move <up|down|left|right|w|a|s|d>` | `p!attack` | `p!use <item>` (auto‑buy) | `p!revive (1 gold)` | `p!auto potion/revive/bomb/attack`
 
 Dungeon help: `p!dungeon help` (rules, rewards, victory, cleanup conditions).
 

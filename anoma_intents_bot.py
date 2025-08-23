@@ -35,7 +35,7 @@ DAILY_COOLDOWN_SEC = 23 * 3600
 WORK_COOLDOWN_SEC = 3600
 DUEL_TIMEOUT_SEC = 120
 DUNGEON_TICK_MS = 2000
-REVIVE_COST = 3
+REVIVE_COST = 1
 
 # Level curve: level^3 * 25 (v2.1)
 
@@ -71,7 +71,8 @@ QUEST_DIFFICULTIES = {
 }
 
 SHOP_ITEMS: Dict[str, int] = {
-    "Potion": 25,
+    "Potion": 2,
+    "Bomb": 3,
     "Rune": 40,
     "Gem": 60,
     "Scroll": 30,
@@ -89,13 +90,13 @@ REGIONS = ["forest", "mountain", "desert"]
 PET_SPECIES = ["wolf", "cat", "hawk", "golem"]
 
 # Dungeon balance (simple)
-PLAYER_BASE_HP = 14
-ENEMY_BASE_HP = 3
+PLAYER_BASE_HP = 16
+ENEMY_BASE_HP = 2
 BOSS_HP = 12
-OBSTACLE_DENSITY = 0.04  # ~4% of inner tiles become obstacles
+OBSTACLE_DENSITY = 0.03  # ~3% of inner tiles become obstacles
 DROP_TABLE = [
-    ("Potion", 0.50),  # heal +5 hp
-    ("Bomb", 0.20),    # deal 3 dmg to adjacent enemies when used
+    ("Potion", 0.60),  # heal +5 hp
+    ("Bomb", 0.25),    # deal 3 dmg to adjacent enemies when used
 ]
 
 # ----------------------- Storage (JSON + Lock) -----------------------
@@ -236,6 +237,8 @@ def _new_dungeon(width: int = 10, height: int = 10) -> Dict[str, Any]:
         "end_at": 0,  # ms timestamp; 0 = no timer
         "next_tick": int(time.time() * 1000) + DUNGEON_TICK_MS,
         "map_auto": False,  # auto-broadcast map once per tick when moves occur
+        "auto_rules": {},   # user_id -> { autopotion:int|None, autorevive:bool, autobomb:int|None, autoattack:bool }
+        "cleared_announced": False,
     }
 
 
@@ -447,8 +450,8 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
             while len(dungeon["obstacles"]) < num_obs:
                 x, y = _rand_empty_cell(dungeon)
                 dungeon["obstacles"].append({"x": x, "y": y})
-            # fewer enemies at low floors; grow slower with floor
-            enemy_count = max(1, len(dungeon["players"]) + max(0, dungeon["floor"] - 1) // 2)
+            # fewer enemies at low floors; grow even slower with floor
+            enemy_count = max(1, len(dungeon["players"]) + max(0, dungeon["floor"] - 1) // 3)
             for i in range(enemy_count):
                 x, y = _rand_empty_cell(dungeon)
                 dungeon["enemies"].append({"x": x, "y": y, "hp": ENEMY_BASE_HP + dungeon["floor"] - 1, "boss": False})
@@ -456,6 +459,7 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                 x, y = _rand_empty_cell(dungeon)
                 dungeon["enemies"].append({"x": x, "y": y, "hp": BOSS_HP + dungeon["floor"], "boss": True})
             dungeon["state"] = "running"
+            dungeon["cleared_announced"] = False
             dungeon["next_tick"] = int(time.time() * 1000) + DUNGEON_TICK_MS
             await _notify_channel(channel_id, "▶️ Dungeon started! Use p!move and p!attack.")
             changed = True
@@ -501,6 +505,59 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                 uses.append(it)
             elif it.get("type") == "dg_revive":
                 revives.append(it)
+        # Standing orders (auto intents)
+        auto_uses: List[Dict[str, Any]] = []
+        auto_attacks: List[Dict[str, Any]] = []
+        rules = dg.get("auto_rules", {})
+        for uid, p in dg["players"].items():
+            if p.get("dead"):
+                # autorevive
+                rule = rules.get(uid, {})
+                if rule.get("autorevive"):
+                    auto_uses.append({
+                        "type": "dg_revive",
+                        "channel_id": channel_id,
+                        "user_id": int(uid),
+                        "created_at": now(),
+                    })
+                continue
+            # autopotion: if hp <= threshold
+            rule = rules.get(uid, {})
+            threshold = rule.get("autopotion")
+            if isinstance(threshold, int) and p.get("hp", PLAYER_BASE_HP) <= threshold:
+                auto_uses.append({
+                    "type": "dg_use",
+                    "channel_id": channel_id,
+                    "user_id": int(uid),
+                    "item": "Potion",
+                    "created_at": now(),
+                })
+            # autobomb: if enemies within radius <= R and count >=1
+            bomb_r = rule.get("autobomb")
+            if isinstance(bomb_r, int):
+                px, py = p["x"], p["y"]
+                nearby = [e for e in dg["enemies"] if abs(e["x"]-px)+abs(e["y"]-py) <= bomb_r]
+                if nearby:
+                    auto_uses.append({
+                        "type": "dg_use",
+                        "channel_id": channel_id,
+                        "user_id": int(uid),
+                        "item": "Bomb",
+                        "created_at": now(),
+                    })
+            # autoattack: if adjacent
+            if rule.get("autoattack"):
+                px, py = p["x"], p["y"]
+                adjacent = any(abs(e["x"]-px)+abs(e["y"]-py)==1 for e in dg["enemies"])
+                if adjacent:
+                    auto_attacks.append({
+                        "type": "dg_attack",
+                        "channel_id": channel_id,
+                        "user_id": int(uid),
+                        "created_at": now(),
+                    })
+        uses.extend(auto_uses)
+        attacks.extend(auto_attacks)
         # 先处理复活
         for rv in revives:
             uid = str(rv["user_id"])
@@ -578,14 +635,36 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                     p = dg["players"].get(uid)
                     if p:
                         px, py = p["x"], p["y"]
-                        for ex, ey in [(px+1,py),(px-1,py),(px,py+1),(px,py-1)]:
-                            for e in dg["enemies"]:
-                                if e["x"] == ex and e["y"] == ey:
-                                    e["hp"] = e.get("hp", ENEMY_BASE_HP) - 3
+                        # Bomb: kill within 1 tile, -3 HP within 2 tiles
+                        hits = 0
+                        kills = 0
+                        new_enemies = []
+                        for e in dg["enemies"]:
+                            dist = abs(e["x"] - px) + abs(e["y"] - py)
+                            if dist <= 1:
+                                hits += 1
+                                kills += 1
+                                continue  # removed (killed)
+                            elif dist <= 2:
+                                hits += 1
+                                new_hp = e.get("hp", ENEMY_BASE_HP) - 3
+                                if new_hp <= 0:
+                                    kills += 1
+                                else:
+                                    e["hp"] = new_hp
+                                    new_enemies.append(e)
+                            else:
+                                new_enemies.append(e)
+                        dg["enemies"] = new_enemies
                         inv.remove(item)
                         profile["inventory"] = inv
                         await player_storage.upsert_player(int(uid), profile)
-                        await _notify_channel(channel_id, f"💣 <@{uid}> used Bomb (-3 HP to adjacent enemies)")
+                        if hits == 0:
+                            await _notify_channel(channel_id, f"💣 <@{uid}> used Bomb, but no enemies in range")
+                        else:
+                            await _notify_channel(channel_id, f"💣 <@{uid}> used Bomb: hit {hits}, killed {kills}")
+            else:
+                await _notify_channel(channel_id, f"❌ <@{uid}> tried to use {item} but does not have it.")
             us["_processed"] = True
         # 攻击
         for at in attacks:
@@ -614,8 +693,9 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                         killed = True
                         user = await _fetch_user(int(uid))
                         prof = await ensure_player(player_storage, user)
-                        prof["xp"] += 5
-                        prof["gold"] += 3
+                        # increase rewards on kill
+                        prof["xp"] += 7
+                        prof["gold"] += 5
                         # drop
                         for name, prob in DROP_TABLE:
                             if random.random() < prob:
@@ -647,7 +727,8 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                 if uid in protected_players or p.get("grace", 0) > 0:
                     continue
                 if abs(p["x"] - e["x"]) + abs(p["y"] - e["y"]) == 1:
-                    dmg = 2 if e.get("boss") else 1
+                    # lower damage overall; bosses hit a bit harder
+                    dmg = 2 if e.get("boss") else 1  # keep base, but player HP increased to 16
                     p["hp"] = p.get("hp", PLAYER_BASE_HP) - dmg
                     if p["hp"] <= 0:
                         p["dead"] = True
@@ -661,8 +742,9 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
         for p in dg["players"].values():
             if p.get("grace", 0) > 0:
                 p["grace"] = max(0, p.get("grace", 0) - 1)
-        if not dg["enemies"]:
+        if not dg["enemies"] and not dg.get("cleared_announced", False):
             await _notify_channel(channel_id, "🎉 Floor cleared. Use p!dungeon next to descend, or instance will close if abandoned.")
+            dg["cleared_announced"] = True
         else:
             pass
         # 若开启自动地图并且本 tick 有移动，则广播一次
@@ -1355,13 +1437,14 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
         dg["floor"] = dg.get("floor", 1) + 1
         dg["enemies"] = []
         dg["obstacles"] = []
+        dg["cleared_announced"] = False
         # generate obstacles
         total_inner = (dg["width"] - 2) * (dg["height"] - 2)
         num_obs = max(0, int(total_inner * OBSTACLE_DENSITY))
         while len(dg["obstacles"]) < num_obs:
             x, y = _rand_empty_cell(dg)
             dg["obstacles"].append({"x": x, "y": y})
-        enemy_count = max(1, len(dg["players"]) + max(0, dg["floor"] - 1) // 2)
+        enemy_count = max(1, len(dg["players"]) + max(0, dg["floor"] - 1) // 3)
         for i in range(enemy_count):
             x, y = _rand_empty_cell(dg)
             dg["enemies"].append({"x": x, "y": y, "hp": ENEMY_BASE_HP + dg["floor"] - 1, "boss": False})
@@ -1378,11 +1461,17 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
             "- Start: p!dungeon start (spawns enemies, begins ticks)\n"
             "- Move: p!move up/down/left/right (w/a/s/d). Walls are the outer border.\n"
             "- Attack: p!attack (melee). Only hits when an enemy is in an adjacent tile.\n"
-            "- Use item: p!use <item> (Potion heals +5; Bomb damages adjacent enemies).\n"
-            "- Revive: p!revive (costs 5 gold).\n"
+            "- Use item: p!use <item> (Potion +5 HP; Bomb: kill within 1 tile, -3 within 2).\n"
+            "  If you don't have the item but have enough gold, it will be auto-purchased.\n"
+            f"- Revive: p!revive (costs {REVIVE_COST} gold).\n"
             "- Map: p!dungeon map (ASCII). Auto map: p!dungeon mapauto on/off.\n"
             "- Status: p!dungeon status | Next floor: p!dungeon next | Leave: p!dungeon leave\n"
             "- Admin: p!dungeon reset (force clear current channel instance)\n\n"
+            "Intent rules:\n"
+            "- p!auto potion <hp> — if HP ≤ <hp>, intent to use/buy Potion.\n"
+            f"- p!auto revive on/off — intent to auto revive (costs {REVIVE_COST}).\n"
+            "- p!auto bomb <radius> — intent to use Bomb when enemies within R.\n"
+            "- p!auto attack on/off — intent to attack when adjacent.\n"
             "Rewards:\n"
             "- Defeating an enemy: +5 XP, +3 gold; chance to drop Potion/Bomb.\n\n"
             "End conditions:\n"
@@ -1498,11 +1587,39 @@ async def use_cmd(ctx: commands.Context, *, item: Optional[str] = None):
     if not item:
         await ctx.send("Usage: p!use <item> (Potion|Bomb)")
         return
+    # quick validations for better UX
+    dg = await dungeon_storage.get(ctx.channel.id)
+    if dg is None or dg.get("state") != "running":
+        await ctx.send("❗ You can only use items inside a running dungeon.")
+        return
+    p = dg.get("players", {}).get(str(ctx.author.id))
+    if p is None:
+        await ctx.send("❗ You are not in this run.")
+        return
+    if p.get("dead"):
+        await ctx.send("💀 You are dead. Use p!revive first.")
+        return
+    profile = await ensure_player(player_storage, ctx.author)
+    inv = profile.get("inventory", [])
+    item_name = item.title()
+    if item_name not in inv:
+        # Try auto-purchase if available and affordable
+        price = SHOP_ITEMS.get(item_name)
+        if price is not None and profile.get("gold", 0) >= price:
+            profile["gold"] -= price
+            inv.append(item_name)
+            profile["inventory"] = inv
+            await player_storage.upsert_player(ctx.author.id, profile)
+            await ctx.send(f"🛒 Auto-purchased {item_name} for {price} gold. Using now…")
+        else:
+            need_msg = f" (need {price})" if price is not None else ""
+            await ctx.send(f"❌ You don't have this item and cannot auto-purchase{need_msg}.")
+            return
     await intent_storage.enqueue({
         "type": "dg_use",
         "channel_id": ctx.channel.id,
         "user_id": ctx.author.id,
-        "item": item,
+        "item": item_name,
         "created_at": now(),
     })
     await ctx.send("🧰 Use intent submitted")
@@ -1558,6 +1675,51 @@ async def region_cmd(ctx: commands.Context, *, args: Optional[str] = None):
         await ctx.send("🌄 Explore intent submitted")
     else:
         await ctx.send("Usage: p!region adventure <start|continue|status|claim|abandon> [region] | explore <help|plunder>")
+
+
+# ---------- Auto intent commands ----------
+@bot.command(name="auto")
+@commands.guild_only()
+async def auto_cmd(ctx: commands.Context, *args: str):
+    if not args:
+        await ctx.send("Usage: p!auto potion <hp>|revive <on|off>|bomb <radius>|attack <on|off>|status")
+        return
+    dg = await dungeon_storage.get(ctx.channel.id)
+    if dg is None:
+        await ctx.send("❗ No dungeon instance in this channel.")
+        return
+    uid = str(ctx.author.id)
+    dg.setdefault("auto_rules", {})
+    rules = dg["auto_rules"].get(uid, {})
+    sub = args[0].lower()
+    if sub == "potion":
+        if len(args) >= 2 and args[1].isdigit():
+            rules["autopotion"] = int(args[1])
+            await ctx.send(f"🧪 Auto Potion set: HP ≤ {rules['autopotion']}")
+        else:
+            rules.pop("autopotion", None)
+            await ctx.send("🧪 Auto Potion disabled")
+    elif sub == "revive":
+        val = args[1].lower() if len(args) >= 2 else "off"
+        rules["autorevive"] = val == "on"
+        await ctx.send(f"❤️ Auto Revive: {'ON' if rules['autorevive'] else 'OFF'} (cost {REVIVE_COST})")
+    elif sub == "bomb":
+        if len(args) >= 2 and args[1].isdigit():
+            rules["autobomb"] = int(args[1])
+            await ctx.send(f"💣 Auto Bomb radius set to {rules['autobomb']}")
+        else:
+            rules.pop("autobomb", None)
+            await ctx.send("💣 Auto Bomb disabled")
+    elif sub == "attack":
+        val = args[1].lower() if len(args) >= 2 else "off"
+        rules["autoattack"] = val == "on"
+        await ctx.send(f"🗡️ Auto Attack: {'ON' if rules['autoattack'] else 'OFF'}")
+    elif sub == "status":
+        await ctx.send(f"Auto rules: {rules}")
+    else:
+        await ctx.send("Usage: p!auto potion <hp>|revive <on|off>|bomb <radius>|attack <on|off>|status")
+    dg["auto_rules"][uid] = rules
+    await dungeon_storage.upsert(ctx.channel.id, dg)
 
 
 # ---------- Pet commands ----------
