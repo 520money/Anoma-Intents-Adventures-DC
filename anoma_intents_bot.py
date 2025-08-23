@@ -35,6 +35,7 @@ DAILY_COOLDOWN_SEC = 23 * 3600
 WORK_COOLDOWN_SEC = 3600
 DUEL_TIMEOUT_SEC = 120
 DUNGEON_TICK_MS = 2000
+REVIVE_COST = 3
 
 # Level curve: level^3 * 25 (v2.1)
 
@@ -88,13 +89,13 @@ REGIONS = ["forest", "mountain", "desert"]
 PET_SPECIES = ["wolf", "cat", "hawk", "golem"]
 
 # Dungeon balance (simple)
-PLAYER_BASE_HP = 10
-ENEMY_BASE_HP = 4
+PLAYER_BASE_HP = 14
+ENEMY_BASE_HP = 3
 BOSS_HP = 12
-OBSTACLE_DENSITY = 0.06  # ~6% of inner tiles become obstacles
+OBSTACLE_DENSITY = 0.04  # ~4% of inner tiles become obstacles
 DROP_TABLE = [
-    ("Potion", 0.30),  # heal +5 hp
-    ("Bomb", 0.15),    # deal 3 dmg to adjacent enemies when used
+    ("Potion", 0.50),  # heal +5 hp
+    ("Bomb", 0.20),    # deal 3 dmg to adjacent enemies when used
 ]
 
 # ----------------------- Storage (JSON + Lock) -----------------------
@@ -234,6 +235,7 @@ def _new_dungeon(width: int = 10, height: int = 10) -> Dict[str, Any]:
         "obstacles": [],  # list of {x,y}
         "end_at": 0,  # ms timestamp; 0 = no timer
         "next_tick": int(time.time() * 1000) + DUNGEON_TICK_MS,
+        "map_auto": False,  # auto-broadcast map once per tick when moves occur
     }
 
 
@@ -445,7 +447,8 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
             while len(dungeon["obstacles"]) < num_obs:
                 x, y = _rand_empty_cell(dungeon)
                 dungeon["obstacles"].append({"x": x, "y": y})
-            enemy_count = max(1, len(dungeon["players"]) + dungeon["floor"] // 1)
+            # fewer enemies at low floors; grow slower with floor
+            enemy_count = max(1, len(dungeon["players"]) + max(0, dungeon["floor"] - 1) // 2)
             for i in range(enemy_count):
                 x, y = _rand_empty_cell(dungeon)
                 dungeon["enemies"].append({"x": x, "y": y, "hp": ENEMY_BASE_HP + dungeon["floor"] - 1, "boss": False})
@@ -502,20 +505,34 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
         for rv in revives:
             uid = str(rv["user_id"])
             p = dg["players"].get(uid)
-            if p and p.get("dead"):
-                # pay 5 gold
-                prof = await ensure_player(player_storage, await _fetch_user(int(uid)))
-                if prof.get("gold", 0) >= 5:
-                    prof["gold"] -= 5
-                    await player_storage.upsert_player(int(uid), prof)
-                    p["dead"] = False
-                    p["hp"] = PLAYER_BASE_HP
-                    # respawn at a safe random cell
-                    rx, ry = _rand_empty_cell(dg)
-                    p["x"], p["y"] = rx, ry
-                    await _notify_channel(channel_id, f"❤️ <@{uid}> revived (-5 gold).")
-            rv["_processed"] = True
+            if not p:
+                await _notify_channel(channel_id, f"❗ <@{uid}> is not in this dungeon run.")
+                rv["_processed"], changed = True, True
+                continue
+            if not p.get("dead"):
+                await _notify_channel(channel_id, f"❗ <@{uid}> is not dead.")
+                rv["_processed"], changed = True, True
+                continue
+            # pay 5 gold
+            prof = await ensure_player(player_storage, await _fetch_user(int(uid)))
+            if prof.get("gold", 0) >= REVIVE_COST:
+                prof["gold"] -= REVIVE_COST
+                await player_storage.upsert_player(int(uid), prof)
+                p["dead"] = False
+                p["hp"] = PLAYER_BASE_HP
+                # respawn at a safe random cell
+                rx, ry = _rand_empty_cell(dg)
+                p["x"], p["y"] = rx, ry
+                # give 1 tick grace after revive so the player won't be instantly killed
+                p["grace"] = max(p.get("grace", 0), 1)
+                await _notify_channel(channel_id, f"❤️ <@{uid}> revived (-{REVIVE_COST} gold). You are protected for 1 tick.")
+                rv["_processed"], changed = True, True
+            else:
+                await _notify_channel(channel_id, f"❌ <@{uid}> not enough gold to revive ({REVIVE_COST} needed).")
+                rv["_processed"], changed = True, True
         # 先处理移动
+        any_move = False
+        protected_players: set[str] = set()
         random.shuffle(moves)
         for mv in moves:
             uid = str(mv["user_id"])
@@ -533,6 +550,14 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
                 if (px, py) not in occupied_players:
                     dg["players"][uid]["x"] = px
                     dg["players"][uid]["y"] = py
+                    any_move = True
+                    # grace: if the player just moved next to an enemy, protect for this and next tick
+                    for e in dg["enemies"]:
+                        if abs(e["x"] - px) + abs(e["y"] - py) == 1:
+                            protected_players.add(uid)
+                            # store grace counter on player to persist across ticks
+                            dg["players"][uid]["grace"] = max(dg["players"][uid].get("grace", 0), 2)
+                            break
             mv["_processed"] = True
         # 物品使用（如炸弹）
         for us in uses:
@@ -619,6 +644,8 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
             for uid, p in dg["players"].items():
                 if p.get("dead"):
                     continue
+                if uid in protected_players or p.get("grace", 0) > 0:
+                    continue
                 if abs(p["x"] - e["x"]) + abs(p["y"] - e["y"]) == 1:
                     dmg = 2 if e.get("boss") else 1
                     p["hp"] = p.get("hp", PLAYER_BASE_HP) - dmg
@@ -630,10 +657,20 @@ async def _solve_dungeons(intents_list: List[Dict[str, Any]]) -> bool:
             if not did_attack and _in_bounds(dg, nx, ny):
                 if all(not (other["x"] == nx and other["y"] == ny) for other in dg["enemies"]) and all(not (p["x"] == nx and p["y"] == ny) for p in dg["players"].values()) and {"x": nx, "y": ny} not in dg.get("obstacles", []):
                     e["x"], e["y"] = nx, ny
+        # decrement grace counters after enemy actions
+        for p in dg["players"].values():
+            if p.get("grace", 0) > 0:
+                p["grace"] = max(0, p.get("grace", 0) - 1)
         if not dg["enemies"]:
             await _notify_channel(channel_id, "🎉 Floor cleared. Use p!dungeon next to descend, or instance will close if abandoned.")
         else:
             pass
+        # 若开启自动地图并且本 tick 有移动，则广播一次
+        if dg.get("map_auto") and any_move:
+            try:
+                await _notify_channel(channel_id, f"```\n{_render_map(dg)}\n```")
+            except Exception:
+                pass
         changed = True
 
     for chan_id_str, dg in list(all_dg.items()):
@@ -842,9 +879,9 @@ async def help_cmd(ctx: commands.Context):
         "p!cancel - (challenger) cancel latest pending duel\n"
         "p!rumble - start free-for-all rumble\n\n"
         "Multiplayer Roguelike Dungeon (full):\n"
-        "p!dungeon create|join|start|leave|status|map|help|next|reset\n"
+        "p!dungeon create|join|start|leave|status|map|help|next|reset|timer|mapauto\n"
         "p!move <up|down|left|right|w|a|s|d> | p!attack | p!use <item> | p!revive\n"
-        "map is on-demand via p!dungeon map (no auto-broadcast).\n\n"
+        "Map is on-demand via p!dungeon map; enable auto with p!dungeon mapauto on.\n\n"
         "Region & Pets:\n"
         "p!region adventure start <forest|mountain|desert> | continue | status | claim | abandon\n"
         "p!region explore <help|plunder>\n"
@@ -1271,7 +1308,7 @@ async def rumble_cmd(ctx: commands.Context, seconds: int = 20):
 @commands.guild_only()
 async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
     if not args:
-        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>")
+        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>|mapauto <on|off>")
         return
     parts = args.strip().split()
     action = parts[0].lower()
@@ -1324,7 +1361,7 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
         while len(dg["obstacles"]) < num_obs:
             x, y = _rand_empty_cell(dg)
             dg["obstacles"].append({"x": x, "y": y})
-        enemy_count = max(1, len(dg["players"]) + dg["floor"] // 1)
+        enemy_count = max(1, len(dg["players"]) + max(0, dg["floor"] - 1) // 2)
         for i in range(enemy_count):
             x, y = _rand_empty_cell(dg)
             dg["enemies"].append({"x": x, "y": y, "hp": ENEMY_BASE_HP + dg["floor"] - 1, "boss": False})
@@ -1343,7 +1380,7 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
             "- Attack: p!attack (melee). Only hits when an enemy is in an adjacent tile.\n"
             "- Use item: p!use <item> (Potion heals +5; Bomb damages adjacent enemies).\n"
             "- Revive: p!revive (costs 5 gold).\n"
-            "- Map: p!dungeon map (ASCII). No auto-broadcast; check on demand.\n"
+            "- Map: p!dungeon map (ASCII). Auto map: p!dungeon mapauto on/off.\n"
             "- Status: p!dungeon status | Next floor: p!dungeon next | Leave: p!dungeon leave\n"
             "- Admin: p!dungeon reset (force clear current channel instance)\n\n"
             "Rewards:\n"
@@ -1372,8 +1409,19 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
         dg["end_at"] = end_at
         await dungeon_storage.upsert(ctx.channel.id, dg)
         await ctx.send(f"⏱️ Timer set: this instance will end in {minutes} minutes.")
+    elif action == "mapauto":
+        if len(parts) >= 2 and parts[1].lower() in ("on", "off"):
+            dg = await dungeon_storage.get(ctx.channel.id)
+            if dg is None:
+                await ctx.send("❌ No dungeon yet. p!dungeon create")
+                return
+            dg["map_auto"] = parts[1].lower() == "on"
+            await dungeon_storage.upsert(ctx.channel.id, dg)
+            await ctx.send(f"🧭 Map auto-broadcast: {'ON' if dg['map_auto'] else 'OFF'}")
+        else:
+            await ctx.send("Usage: p!dungeon mapauto <on|off>")
     else:
-        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>")
+        await ctx.send("Usage: p!dungeon create|join|start|leave|status|map|help|next|reset|timer <minutes>|mapauto <on|off>")
 
 
 # ---------- Move & Attack commands (immediate ack, reaction optional) ----------
@@ -1382,6 +1430,21 @@ async def dungeon_cmd(ctx: commands.Context, *, args: Optional[str] = None):
 async def move_cmd(ctx: commands.Context, direction: str = None):
     if not direction:
         await ctx.send("Usage: p!move <up|down|left|right|w|a|s|d>")
+        return
+    # quick validations for better UX
+    dg = await dungeon_storage.get(ctx.channel.id)
+    if dg is None:
+        await ctx.send("❌ No dungeon yet. p!dungeon create")
+        return
+    if dg.get("state") != "running":
+        await ctx.send("❗ Not started. p!dungeon start")
+        return
+    p = dg.get("players", {}).get(str(ctx.author.id))
+    if p is None:
+        await ctx.send("❗ You are not in this run. Join before start or wait for next.")
+        return
+    if p.get("dead"):
+        await ctx.send("💀 You are dead. Use p!revive (costs 5 gold).")
         return
     await intent_storage.enqueue({
         "type": "dg_move",
@@ -1400,6 +1463,21 @@ async def move_cmd(ctx: commands.Context, direction: str = None):
 @bot.command(name="attack")
 @commands.guild_only()
 async def attack_cmd(ctx: commands.Context):
+    # quick validations for better UX
+    dg = await dungeon_storage.get(ctx.channel.id)
+    if dg is None:
+        await ctx.send("❌ No dungeon yet. p!dungeon create")
+        return
+    if dg.get("state") != "running":
+        await ctx.send("❗ Not started. p!dungeon start")
+        return
+    p = dg.get("players", {}).get(str(ctx.author.id))
+    if p is None:
+        await ctx.send("❗ You are not in this run. Join before start or wait for next.")
+        return
+    if p.get("dead"):
+        await ctx.send("💀 You are dead. Use p!revive (costs 5 gold).")
+        return
     await intent_storage.enqueue({
         "type": "dg_attack",
         "channel_id": ctx.channel.id,
@@ -1439,7 +1517,7 @@ async def revive_cmd(ctx: commands.Context):
         "user_id": ctx.author.id,
         "created_at": now(),
     })
-    await ctx.send("❤️ Revive intent submitted (costs 5 gold)")
+    await ctx.send(f"❤️ Revive intent submitted (costs {REVIVE_COST} gold)")
 
 
 # ---------- Region commands ----------
